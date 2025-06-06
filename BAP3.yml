@@ -1,0 +1,14 @@
+name: BAP3
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9
+  - pandas
+  - numpy
+  - matplotlib
+  - jupyterlab
+  - openjdk=11  
+  - pip
+  - pip:
+      - pynetlogo
