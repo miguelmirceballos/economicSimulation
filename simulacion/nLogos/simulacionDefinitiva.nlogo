@@ -9,41 +9,41 @@
 breed [producers producer]
 breed [consumers consumer]
 
-producers-own [
-  precio                ;; Precio al que vende cada unidad
-  calidad               ;; Calidad del bien (escala 1..3)
-  inventario            ;; Unidades disponibles para vender (acumulado)
-  produccion_actual     ;; Unidades que produce cada tick
-  ventas_previas        ;; Unidades vendidas en el tick anterior
+producers-own [         ;; tiempo se refiere a cada escenario siendo el primero t=1, el segundo t=2...
+  precio                ;; Precio al que vende cada producto
+  calidad               ;; Calidad del producto
+  inventario            ;; Unidades disponibles para vender, se va acumulando
+  produccion_actual     ;; Unidades producidas en cada tiempo
+  ventas_previas        ;; Unidades vendidas en el tiempo anterior
   precio_base           ;; Precio mínimo permitido
-  capacidad_max         ;; Límite máximo de producción por tick
+  capacidad_max         ;; Límite máximo de producción en cada tiempo
+]
+ 
+consumers-own [         ;; Todo estos varia en cada tiempo, t=1, t=2 ...
+  necesidad             ;; Cantidad de productos en total que quiere comprar 
+  tolerancia_precio     ;; El precio máximo dispuesto a pagar
+  preferencia_calidad   ;; Calidad buscada
+  necesidad_base        ;; Necesidad base 
 ]
 
-consumers-own [
-  necesidad             ;; Unidades que quiere comprar este tick
-  tolerancia_precio     ;; Precio máximo dispuesto a pagar
-  preferencia_calidad   ;; Nivel de calidad buscada
-  necesidad_base        ;; Necesidad base para cada tick
-]
+globals [               ;; el ajuste es cuando todos los agentes han hecho sus respectivas acciones en ese tiempo/escenario
+  precio_medio          ;; Precio promedio de todos los productores despues del ajuste 
+  produccion-total      ;; Suma del atributo produccion_actual de todos los productores despues del ajuste 
+  demanda-agregada      ;; Suma del atributo necesidad de todos los consumidores al inicio del tiempo/escenario
+  inventario-total      ;; Suma de inventario de todos los productores tras comprar
 
-globals [
-  precio_medio          ;; Precio promedio de todos los productores (post-ajuste)
-  produccion-total      ;; Suma de produccion_actual de todos los productores (post-ajuste)
-  demanda-agregada      ;; Suma de necesidad de todos los consumidores al inicio del tick
-  inventario-total      ;; Suma de inventario de todos los productores (post-compra)
+  lista-precios         ;; historial de precios (hasta 20 tiempos) para volatilidad
 
-  lista-precios         ;; historial de precios (hasta 20 ticks) para volatilidad
-
-  ;; Variables de extracción PRE-AJUSTE
+  ;; Variables de extracción todas antes del ajuste 
   precio_preajuste
   produccion_preajuste
   inventario_preajuste
   demanda_preajuste
 
-  ;; Nuevas variables (POST-AJUSTE / métricas extras)
+  ;; Nuevas variables  despues del ajuste, son metricas extra y las objetivo de nuestra red neuronal a realizar
   volatilidad_precio    ;; sd(lista-precios)
-  subida_brusca_precio? ;; booleano: true si el precio saltó >10% este tick
-  escasez?              ;; booleano: true si la demanda supera 110% de la oferta
+  subida_brusca_precio? ;; es 1 si el precio saltó mas de un 10% en ese paso
+  escasez?              ;; es 1 si la demanda supera un 110% de la oferta
 ]
 
 ;-------------------------------------------------------------
@@ -52,10 +52,10 @@ globals [
 to setup
   clear-all
 
-  ;; Inicializar escenario (puedes cambiar esta línea desde Interface o Python)
+  ;; Inicializacion del escenario 
   set escenario "estabilidad"  ;; opciones: "estabilidad", "inflacion", "recesion", "escasez"
 
-  ;; 1) Crear productores (entre 15 y 24 aleatorios)
+  ;; 1. Crear productores,entre 15 y 24 aleatoriamente
   let num-producers 15 + random 10
   create-producers num-producers [
     set color red
@@ -63,15 +63,15 @@ to setup
     setxy random-xcor random-ycor
 
     set precio round (5 + random 10)         ;; Precio inicial entre 5 y 15
-    set calidad 1 + round random 3           ;; Calidad en {1,2,3}
+    set calidad 1 + round random 3           ;; Calidad de 1 a 3
     set produccion_actual 40 + round random 40;; Producción inicial entre 40 y 80
     set ventas_previas 0
     set inventario 0                         ;; Al inicio, no hay stock acumulado
     set precio_base 5
-    set capacidad_max 1000 + round random 50 ;; Cada productor no puede producir más de 100 por tick
+    set capacidad_max 1000 + round random 50 ;; Cada productor no puede producir más de 100 en cada tiempo
   ]
 
-  ;; 2) Calcular precio-medio inicial
+  ;; 2. Calcular precio-medio inicial
   ifelse any? producers [
     set precio_medio round mean [precio] of producers
   ] [
@@ -82,9 +82,9 @@ to setup
   set lista-precios (list precio_medio)   ;; arranca con el único precio disponible
   set volatilidad_precio 0                ;; con un solo dato, sd = 0
   set subida_brusca_precio? false         ;; aún no hay comparación anterior
-  set escasez? false                      ;; sin datos de oferta/demanda aun
+  set escasez? false                      ;; sin datos de oferta/demanda al inicializar
 
-  ;; 3) Crear consumidores (entre 250 y 299 aleatorios)
+  ;; 3. Crear consumidores, entre 250 y 299 aleatoriamente
   let num-consumers 250 + random 50
   create-consumers num-consumers [
     set color yellow
@@ -97,12 +97,12 @@ to setup
     set preferencia_calidad 1 + round random 3 ;; Preferencia calidad entre 1 y 3
   ]
 
-  ;; 4) Inicializar variables globales
+  ;; 4. Inicializar variables globales
   set produccion-total sum [produccion_actual] of producers
   set demanda-agregada sum [necesidad] of consumers
   set inventario-total sum [inventario] of producers
 
-  ;; 5) Variables de extracción iniciales
+  ;; 5. Variables de extracción iniciales
   set precio_preajuste precio_medio
   set produccion_preajuste produccion-total
   set inventario_preajuste inventario-total
@@ -116,9 +116,9 @@ end
 ;-------------------------------------------------------------
 to go
 
-  ;; 2) Inducir dinámica macro según 'escenario'
+  ;; 2. Inducir dinámica macro según el escenario especificado
   if escenario = "inflacion" [
-    ;; Aumentar gradualmente el número de consumidores (2% más cada tick)
+    ;; Aumentar gradualmente el número de consumidores un 2% por cada tiempo de inflacion
     let incremento round (count consumers * 0.02)
     create-consumers incremento [
       set color yellow
@@ -131,36 +131,36 @@ to go
     ]
   ]
   if escenario = "recesion" [
-    ;; Reducir gradualmente el número de consumidores (2% menos cada tick)
+    ;; Reducir gradualmente el número de consumidores un 2% por cada tiempo de recesion
     let a_remover round (count consumers * 0.02)
     if a_remover > 0 [
       ask n-of a_remover consumers [ die ]
     ]
   ]
   if escenario = "escasez" [
-    ;; Limitar producción de todos los productores a un 90% de su capacidad cada tick
+    ;; Limitar producción de todos los productores a un 90% de su capacidad cada tiempo que sea escasez
     ask producers [
       set capacidad_max round (capacidad_max * 0.9)
     ]
   ]
-  ;; Si "estabilidad", no hacemos nada especial
+  ;; Si el escenario es estabilidad, no hacemos nada, todo se mantiene estable
 
-  ;; 3) Fase de producción y acumulación de inventario:
+  ;; 3. Fase de producción y acumulación de inventario:
   ask producers [
     set ventas_previas 0
     set inventario inventario + produccion_actual
   ]
 
-  ;; 4) Calcular demanda-agregada inicial (antes de las compras)
+  ;; 4. Calcular la demanda agregada inicial (antes de las compras)
   set demanda-agregada sum [necesidad] of consumers
 
-  ;; 5) Almacenar estado PRE-AJUSTE para extracción de datos
+  ;; 5. Almacenar estado antes del ajuste para extracción de datos
   set precio_preajuste round precio_medio
   set produccion_preajuste produccion-total
   set inventario_preajuste inventario-total
   set demanda_preajuste demanda-agregada
 
-  ;; 6) Fase de compras: cada consumidor cubre su 'necesidad'
+  ;; 6. Fase de compras donde cada consumidor cubre su 'necesidad'
   ask consumers [
     while [ necesidad > 0 ] [
       let candidatos producers with [
@@ -186,11 +186,11 @@ to go
     ]
   ]
 
-  ;; 7) Recalcular producción total e inventario total tras compras
+  ;; 7. Recalcular producción total e inventario total tras compras
   set produccion-total sum [produccion_actual] of producers
   set inventario-total sum [inventario] of producers
 
-  ;; 8) Ajuste de producción y precio para cada productor (igual que antes)
+  ;; 8. Ajuste de producción y precio para cada productor 
   ask producers [
     let offered produccion_actual
     let sales ventas_previas
@@ -204,7 +204,7 @@ to go
       [ sales / total_supply ] [ 0 ]
 
     if sales >= offered [
-      ;; Alta demanda
+      ;;  si hay Alta demanda
       let nueva_prod min list capacidad_max (round (produccion_actual * 1.10 + 1))
       set produccion_actual nueva_prod
 
@@ -215,7 +215,7 @@ to go
       ]
     ]
     if sales < offered [
-      ;; Sobreoferta
+      ;; si hay Sobreoferta
       let prod_reducida max list 1 round (produccion_actual * 0.80)
       set produccion_actual prod_reducida
 
@@ -224,14 +224,14 @@ to go
       set precio precio_nuevo
     ]
 
-    ;; Tope de inventario
+    ;; si hay Tope de inventario
     if inventario > (capacidad_max * 2) [
       set inventario (capacidad_max * 2)
     ]
     set inventario max list 0 inventario
   ]
 
-  ;;; 9) Recalcular variables globales y métricas extra
+  ;;; 9. Recalcular variables globales y métricas extra
   ifelse any? producers [
     set precio_medio round mean [precio] of producers
   ] [
@@ -240,13 +240,13 @@ to go
   set produccion-total sum [produccion_actual] of producers
   set inventario-total sum [inventario] of producers
 
-  ;; 9.1) Actualizar lista-precios (hasta 20 ticks)
+  ;; 9.1 Actualizar lista-precios, hasta 20 tiempos
   set lista-precios lput precio_medio lista-precios
   if length lista-precios > 20 [
     set lista-precios but-first lista-precios
   ]
 
-  ;; 9.2) Calcular volatilidad como desviación estándar
+  ;; 9.2 Calcular volatilidad como desviación estándar
   ifelse length lista-precios > 1 [
     let m mean lista-precios
     let squared-list map [ [x] -> (x - m) * (x - m) ] lista-precios
@@ -255,8 +255,8 @@ to go
     set volatilidad_precio 0
   ]
 
-  ;; 9.3) Detectar "subida brusca de precio" comparando con el tick anterior
-  ;; Umbral: +10% respecto al precio anterior
+  ;; 9.3 Detectar si hay "subida brusca de precio" comparando con el tiempo anterior
+  ;; Umbral de +10% respecto al precio anterior
   ifelse length lista-precios > 5 [
     let anterior item (length lista-precios - 5) lista-precios
     let porcentaje_cambio ( precio_medio - anterior ) / max list anterior 1
@@ -269,7 +269,7 @@ to go
     set subida_brusca_precio? false
   ]
 
-  ;; 9.4) Detectar "escasez" si demanda supera fuertemente a la oferta
+  ;; 9.4 Detectar "escasez" si la demanda supera fuertemente a la oferta
   let oferta_total sum [produccion_actual] of producers
   ifelse demanda_preajuste > oferta_total * 1.10 [
     set escasez? true
@@ -277,7 +277,7 @@ to go
     set escasez? false
   ]
 
-  ;; 10) Renovar necesidad y tolerancia de consumidores
+  ;; 10. Renovar necesidad y tolerancia de consumidores
   ask consumers [
     set necesidad max list 0 (necesidad_base + one-of [-2 -1 0 1 2])
     set tolerancia_precio precio_medio + random (precio_medio * necesidad)

@@ -10,5 +10,9 @@ dependencies:
   - jupyterlab
   - openjdk=11  
   - pip
+  - keras
+  - tensorflow
+  - scikit-learn
+  - seaborn
   - pip:
       - pynetlogo
