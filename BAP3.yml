@@ -12,7 +12,11 @@ dependencies:
   - pip
   - keras
   - tensorflow
-  - scikit-learn
+  - scikit-learn=1.4.2     # 👈 aquí rebajamos
   - seaborn
+  - scikeras                # 👈 conda-forge lo instalará compatible
   - pip:
       - pynetlogo
+
+
+
